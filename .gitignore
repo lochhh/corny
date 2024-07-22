@@ -1,0 +1,12 @@
+# Ignore everything
+*
+
+# Don't ignore .gitignore
+!.gitignore
+
+# Don't ignore directories
+!*/
+
+# Don't ignore density estimation/maps directory
+!density\ estimation/
+!density\ estimation/maps/
