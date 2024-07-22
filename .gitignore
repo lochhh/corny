@@ -9,4 +9,4 @@
 
 # Don't ignore density estimation/maps directory
 !density\ estimation/
-!density\ estimation/maps/
+!density\ estimation/**
