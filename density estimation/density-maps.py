@@ -88,50 +88,6 @@ def resize_image(image, target_size):
 
     return new_image, new_width, new_height, paste_x, paste_y
 
-# def process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size=(256, 256), sigma=10):
-#     os.makedirs(output_map_folder, exist_ok=True)
-#     os.makedirs(output_image_folder, exist_ok=True)
-
-#     resized_folder = output_image_folder
-#     os.makedirs(resized_folder, exist_ok=True)
-    
-#     for filename in os.listdir(image_folder):
-#         if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-#             image_path = os.path.join(image_folder, filename)
-#             annotation_path = os.path.join(annotation_folder, os.path.splitext(filename)[0] + '.txt')
-            
-#             if not os.path.exists(annotation_path):
-#                 print(f"Annotation file not found for {filename}, skipping.")
-#                 continue
-            
-#             print(f"Processing {filename}")
-
-#             # Load and resize image
-#             original_image = Image.open(image_path)
-#             resized_image, new_width, new_height, paste_x, paste_y = resize_image(original_image, target_size)
-            
-#             # Read YOLO annotations and adjust for resized image
-#             original_width, original_height = original_image.size
-#             points = read_yolo_annotations(annotation_path, original_width, original_height)
-            
-#             # Adjust point coordinates for resized image
-#             scale_x = new_width / original_width
-#             scale_y = new_height / original_height
-#             adjusted_points = [(int(x * scale_x) + paste_x, int(y * scale_y) + paste_y, c) for x, y, c in points]
-            
-#             # Create class-specific density maps
-#             class_density_maps = create_class_specific_density_maps(target_size, adjusted_points, class_labels, sigma)
-            
-#             # Save resized image in the 'resized' subfolder
-#             resized_image_path = os.path.join(resized_folder, filename)
-#             resized_image.save(resized_image_path)
-            
-#             # Save density maps
-#             for i, class_map in enumerate(class_density_maps):
-#                 np.save(os.path.join(output_map_folder, f"{os.path.splitext(filename)[0]}_class_{i}_density.npy"), class_map)
-            
-#             print(f"Processed {filename}")
-
 def process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size=(256, 256), sigma=10, resize=False):
     os.makedirs(output_map_folder, exist_ok=True)
     os.makedirs(output_image_folder, exist_ok=True)
