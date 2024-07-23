@@ -61,7 +61,7 @@ def create_class_specific_density_maps(image_shape, points, class_labels, sigma=
     
     for class_id in class_labels:
         class_points = [(x, y, c) for x, y, c in points if c == class_id ]
-        print(class_points)
+        # print(class_points)
         class_map = create_density_map(image_shape, class_points, sigma)
         class_density_maps.append(class_map)
 
@@ -88,7 +88,7 @@ def resize_image(image, target_size):
 
     return new_image, new_width, new_height, paste_x, paste_y
 
-def process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size=(256, 256), sigma=10, resize=False):
+def process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, resize, target_size=(256, 256), sigma=10):
     os.makedirs(output_map_folder, exist_ok=True)
     os.makedirs(output_image_folder, exist_ok=True)
 
@@ -119,22 +119,23 @@ def process_images(image_folder, annotation_folder, output_map_folder, output_im
                 # Save resized image
                 resized_image_path = os.path.join(output_image_folder, filename)
                 resized_image.save(resized_image_path)
+                image_shape = target_size
             else:
                 # Use original image and points if resize is False
                 adjusted_points = read_yolo_annotations(annotation_path, original_width, original_height)
                 # Copy original image to output folder
                 original_image_path = os.path.join(output_image_folder, filename)
                 original_image.save(original_image_path)
+                image_shape = (original_height, original_width)
             
             # Create class-specific density maps
-            image_shape = target_size if resize else (original_height, original_width)
             class_density_maps = create_class_specific_density_maps(image_shape, adjusted_points, class_labels, sigma)
             
             # Save density maps
             for i, class_map in enumerate(class_density_maps):
                 np.save(os.path.join(output_map_folder, f"{os.path.splitext(filename)[0]}_class_{i}_density.npy"), class_map)
             
-            print(f"Processed {filename}")
+            # print(f"Processed {filename}")
 
 def visualize_density_map(image_path, density_map_path, output_path=None):
     """
@@ -173,7 +174,7 @@ if __name__ == "__main__":
     
     stub_list = ['train', 'val', 'test']
     target_size = (512, 512)
-    sigma = 12
+    sigma = 7
     resize = True
 
     for stub in stub_list:
@@ -190,7 +191,7 @@ if __name__ == "__main__":
 
         class_labels = [0]  # 0 for kernel
 
-        process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size, sigma)
+        process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, resize, target_size, sigma)
 
         # Visualize the density map for a sample (first) image in the dataset
         image_files = [file for file in os.listdir(output_image_folder) if file.lower().endswith('.jpg')]
