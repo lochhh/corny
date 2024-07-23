@@ -67,37 +67,6 @@ def create_class_specific_density_maps(image_shape, points, class_labels, sigma=
 
     return class_density_maps
 
-# def resize_image(image, target_size):
-#     """
-#     Resize image while maintaining aspect ratio.
-    
-#     :param image: PIL Image object
-#     :param target_size: Tuple of (width, height) for the target size
-#     :return: Resized PIL Image object
-#     """
-#     original_width, original_height = image.size
-#     aspect_ratio = original_width / original_height
-#     target_width, target_height = target_size
-
-#     if aspect_ratio > target_width / target_height:
-#         # Image is wider than target aspect ratio
-#         new_width = target_width
-#         new_height = int(new_width / aspect_ratio)
-#     else:
-#         # Image is taller than target aspect ratio
-#         new_height = target_height
-#         new_width = int(new_height * aspect_ratio)
-
-#     resized_image = image.resize((new_width, new_height), Image.LANCZOS)
-    
-#     # Create a new image with the target size and paste the resized image
-#     new_image = Image.new("RGB", target_size, (0, 0, 0))
-#     paste_x = (target_width - new_width) // 2
-#     paste_y = (target_height - new_height) // 2
-#     new_image.paste(resized_image, (paste_x, paste_y))
-
-#     return new_image
-
 def resize_image(image, target_size):
     original_width, original_height = image.size
     aspect_ratio = original_width / original_height
@@ -119,13 +88,54 @@ def resize_image(image, target_size):
 
     return new_image, new_width, new_height, paste_x, paste_y
 
-def process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size=(256, 256), sigma=10):
+# def process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size=(256, 256), sigma=10):
+#     os.makedirs(output_map_folder, exist_ok=True)
+#     os.makedirs(output_image_folder, exist_ok=True)
+
+#     resized_folder = output_image_folder
+#     os.makedirs(resized_folder, exist_ok=True)
+    
+#     for filename in os.listdir(image_folder):
+#         if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+#             image_path = os.path.join(image_folder, filename)
+#             annotation_path = os.path.join(annotation_folder, os.path.splitext(filename)[0] + '.txt')
+            
+#             if not os.path.exists(annotation_path):
+#                 print(f"Annotation file not found for {filename}, skipping.")
+#                 continue
+            
+#             print(f"Processing {filename}")
+
+#             # Load and resize image
+#             original_image = Image.open(image_path)
+#             resized_image, new_width, new_height, paste_x, paste_y = resize_image(original_image, target_size)
+            
+#             # Read YOLO annotations and adjust for resized image
+#             original_width, original_height = original_image.size
+#             points = read_yolo_annotations(annotation_path, original_width, original_height)
+            
+#             # Adjust point coordinates for resized image
+#             scale_x = new_width / original_width
+#             scale_y = new_height / original_height
+#             adjusted_points = [(int(x * scale_x) + paste_x, int(y * scale_y) + paste_y, c) for x, y, c in points]
+            
+#             # Create class-specific density maps
+#             class_density_maps = create_class_specific_density_maps(target_size, adjusted_points, class_labels, sigma)
+            
+#             # Save resized image in the 'resized' subfolder
+#             resized_image_path = os.path.join(resized_folder, filename)
+#             resized_image.save(resized_image_path)
+            
+#             # Save density maps
+#             for i, class_map in enumerate(class_density_maps):
+#                 np.save(os.path.join(output_map_folder, f"{os.path.splitext(filename)[0]}_class_{i}_density.npy"), class_map)
+            
+#             print(f"Processed {filename}")
+
+def process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size=(256, 256), sigma=10, resize=False):
     os.makedirs(output_map_folder, exist_ok=True)
     os.makedirs(output_image_folder, exist_ok=True)
 
-    resized_folder = output_image_folder
-    os.makedirs(resized_folder, exist_ok=True)
-    
     for filename in os.listdir(image_folder):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
             image_path = os.path.join(image_folder, filename)
@@ -137,25 +147,32 @@ def process_images(image_folder, annotation_folder, output_map_folder, output_im
             
             print(f"Processing {filename}")
 
-            # Load and resize image
+            # Load image
             original_image = Image.open(image_path)
-            resized_image, new_width, new_height, paste_x, paste_y = resize_image(original_image, target_size)
-            
-            # Read YOLO annotations and adjust for resized image
             original_width, original_height = original_image.size
-            points = read_yolo_annotations(annotation_path, original_width, original_height)
-            
-            # Adjust point coordinates for resized image
-            scale_x = new_width / original_width
-            scale_y = new_height / original_height
-            adjusted_points = [(int(x * scale_x) + paste_x, int(y * scale_y) + paste_y, c) for x, y, c in points]
+
+            if resize:
+                # Resize image if resize is True
+                resized_image, new_width, new_height, paste_x, paste_y = resize_image(original_image, target_size)
+                # Read YOLO annotations and adjust for resized image
+                points = read_yolo_annotations(annotation_path, original_width, original_height)
+                # Adjust point coordinates for resized image
+                scale_x = new_width / original_width
+                scale_y = new_height / original_height
+                adjusted_points = [(int(x * scale_x) + paste_x, int(y * scale_y) + paste_y, c) for x, y, c in points]
+                # Save resized image
+                resized_image_path = os.path.join(output_image_folder, filename)
+                resized_image.save(resized_image_path)
+            else:
+                # Use original image and points if resize is False
+                adjusted_points = read_yolo_annotations(annotation_path, original_width, original_height)
+                # Copy original image to output folder
+                original_image_path = os.path.join(output_image_folder, filename)
+                original_image.save(original_image_path)
             
             # Create class-specific density maps
-            class_density_maps = create_class_specific_density_maps(target_size, adjusted_points, class_labels, sigma)
-            
-            # Save resized image in the 'resized' subfolder
-            resized_image_path = os.path.join(resized_folder, filename)
-            resized_image.save(resized_image_path)
+            image_shape = target_size if resize else (original_height, original_width)
+            class_density_maps = create_class_specific_density_maps(image_shape, adjusted_points, class_labels, sigma)
             
             # Save density maps
             for i, class_map in enumerate(class_density_maps):
@@ -197,11 +214,17 @@ def visualize_density_map(image_path, density_map_path, output_path=None):
     # plt.close()
 
 if __name__ == "__main__":
-    stub = 'val'
+    stub = 'test'
     target_size = (256, 256)
-    sigma = 1.8
+    sigma = 12
 
-    target_size_str = f"{target_size[0]}x{target_size[1]}"
+    #if resize is false, target size will be ignored. Adjust sigma accordningly
+    resize = False
+    
+    if resize:
+        target_size_str = f"{target_size[0]}x{target_size[1]}"
+    else:
+        target_size_str = "orignal_size"
     
     
     output_image_folder = f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"
