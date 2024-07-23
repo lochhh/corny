@@ -1,0 +1,17 @@
+name: pytorch_cuda11
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - pip
+  - pytorch
+  - torchvision
+  - pytorch-cuda=11.8
+  - ultralytics
+  - pip:
+      - ipykernel
+      - supervision
+      - h5py
