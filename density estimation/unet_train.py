@@ -1,9 +1,14 @@
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import TQDMProgressBar
+from pytorch_lightning.callbacks import TQDMProgressBar, Callback
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.tuner import Tuner
 
+from pytorch_lightning.utilities.types import EVAL_DATALOADERS
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torchmetrics.functional import mean_absolute_percentage_error
+
 import os
 from torch.utils.data import Dataset
 
@@ -11,19 +16,38 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import numpy as np
+import matplotlib.pyplot as plt
 
 class ConvBlock(nn.Module):
-    def __init__(self,in_channels,out_channels):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels=in_channels,out_channels=out_channels,kernel_size=(3,3),stride=1, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels,kernel_size=(3,3),stride=1, padding=1)
-        self.relu = nn.ReLU()
+        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.LeakyReLU(0.1)
         
-    def forward(self,x):
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
+    def forward(self, x):
+        x = self.conv1(x)
+        # print(f"Conv1 output range: {x.min().item()} to {x.max().item()}")
+        
+        x = self.bn1(x)
+        # print(f"BN1 output range: {x.min().item()} to {x.max().item()}")
+        
+        x = self.relu(x)
+        # print(f"ReLU1 output range: {x.min().item()} to {x.max().item()}")
+        
+        x = self.conv2(x)
+        # print(f"Conv2 output range: {x.min().item()} to {x.max().item()}")
+        
+        x = self.bn2(x)
+        # print(f"BN2 output range: {x.min().item()} to {x.max().item()}")
+        
+        x = self.relu(x)
+        # print(f"ReLU2 output range: {x.min().item()} to {x.max().item()}")
+        
         return x
-
+    
 class EncoderBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -69,44 +93,105 @@ class UNet(nn.Module):
         skip_connections = []
 
         # Encoder path
-        for encoder in self.encoder_blocks:
+        for idx, encoder in enumerate(self.encoder_blocks):
+            # print(f"Evaluating encoder block {idx}")
             x, features = encoder(x)
+            if torch.isnan(x).any():
+                print(f"NaN detected in encoder block {idx}")
             skip_connections.append(features)
         
+        # print(f"Evaluating bottleneck")
         x = self.bottleneck(x)
 
         # Decoder path
         skip_connections = skip_connections[::-1]  # Reverse the list
         for idx, decoder in enumerate(self.decoder_blocks):
+            # print(f"Evaluating decoder block {idx}")
             x = decoder(x, skip_connections[idx])
 
         # Final output layer
         return self.final_conv(x)
 
+def weights_init(m):
+    if isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu', a=0.1)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.BatchNorm2d):
+        nn.init.constant_(m.weight, 1)
+        nn.init.constant_(m.bias, 0)
+
 class UNetLightningModule(pl.LightningModule):
     def __init__(self, in_channels, out_channels, features, learning_rate):
         super().__init__()
+
         self.model = UNet(in_channels, out_channels, features)
         self.learning_rate = learning_rate
+
+    # # initialise weights
+    # def configure_model(self):
+    #     self.apply(weights_init)
 
     def forward(self, x):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
+        # print(f"Batch {batch_idx}")
+
         x, y = batch
+        
+        # print(f"Input shape: {x.shape}, Target shape: {y.shape}")
+        # print(f"Input range: {x.min().item()} to {x.max().item()}")
+        # print(f"Target range: {y.min().item()} to {y.max().item()}")
+        
         y_hat = self(x)
+        
+        # print(f"Output shape: {y_hat.shape}")
+        # print(f"Output range: {y_hat.min().item()} to {y_hat.max().item()}")
+        
         loss = F.mse_loss(y_hat, y)
+        
+        # print(f"Loss: {loss.item()}")
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
+
+        # Calculate various metrics
+        
+        # Calculate count error
+        true_count = y.sum(dim=(1,2,3))
+        pred_count = y_hat.sum(dim=(1,2,3))
+        count_error = torch.abs(true_count - pred_count)
+
+        # Calculate MAPE on count
+        epsilon = 1e-8  # Small value to avoid division by zero
+        mape = torch.mean(torch.abs((true_count - pred_count) / (true_count + epsilon)))
+        mape = mape * 100  # Convert to percentage
+        
+        # # Handle potential infinity in MAPE
+        # if torch.isinf(mape) or torch.isnan(mape):
+        #     mape = torch.tensor(100.0, device=mape.device)  # Set to 100% error if inf or nan
+
+        # Log all metrics
+        self.log('val_mape', mape, prog_bar=True, on_step=False, on_epoch=True)
+        self.log('val_mape', mape, prog_bar=True, on_step=False, on_epoch=True)
+        self.log('val_count_error', count_error.mean(), prog_bar=True, on_step=False, on_epoch=True)
+
         loss = F.mse_loss(y_hat, y)
-        self.log('val_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
+
+        # print(f"Validation Loss: {loss.item()}")
+        self.log('val_mse_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+            return {
+                'optimizer': optimizer,
+                # 'gradient_clip_val': 0.1,
+                # 'gradient_clip_algorithm': 'norm'
+            }
 
 class CornKernelDataset(Dataset):
     def __init__(self, image_dir, density_map_dir, transform=None):
@@ -170,6 +255,54 @@ class CornKernelDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, 
                          num_workers=self.num_workers)
+    
+    def predict_dataloader(self) -> torch.Any:
+        return super().predict_dataloader()
+
+class DensityMapVisualizationCallback(Callback):
+    def __init__(self, val_samples, num_samples=4):
+        super().__init__()
+        self.val_imgs, self.val_density_maps = val_samples
+        self.num_samples = num_samples
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        # Move validation samples to the same device as the model
+        val_imgs = self.val_imgs[:self.num_samples].to(pl_module.device)
+        val_density_maps = self.val_density_maps[:self.num_samples].to(pl_module.device)
+        
+        # Get predictions
+        pl_module.eval()
+        with torch.no_grad():
+            preds = pl_module(val_imgs)
+        pl_module.train()
+        
+
+        # print(f"Validation Predictions Shape: {preds.shape}")
+        # print(f"Ground truth map shape {val_density_maps.shape} ")
+
+        # Create a figure to display images, ground truth, and predictions
+        fig, axes = plt.subplots(self.num_samples, 3, figsize=(15, 5*self.num_samples))
+        for i in range(self.num_samples):
+            # Display input image
+            axes[i, 0].imshow(val_imgs[i].cpu().permute(1, 2, 0))
+            axes[i, 0].set_title("Input Image")
+            axes[i, 0].axis('off')
+            
+            # Display ground truth density map
+            axes[i, 1].imshow(val_density_maps[i].cpu().squeeze(), cmap='hot')
+            axes[i, 1].set_title("Ground Truth")
+            axes[i, 1].axis('off')
+            
+            # Display predicted density map
+            axes[i, 2].imshow(preds[i].cpu().squeeze(), cmap='hot')
+            axes[i, 2].set_title("Prediction")
+            axes[i, 2].axis('off')
+        
+        plt.tight_layout()
+        
+        # Log the figure to TensorBoard
+        trainer.logger.experiment.add_figure("Validation Predictions", fig, trainer.global_step)
+        plt.close(fig)
 
 if __name__ == "__main__":
 
@@ -179,14 +312,14 @@ if __name__ == "__main__":
         'in_channels': 3,
         'out_channels': 1,
         'features': [64, 128, 256, 512],  # UNet feature sizes
-        'learning_rate': 1e-3,
+        'learning_rate': 1e-4,
 
         # Data hyperparameters
-        'batch_size': 3,
+        'batch_size': 4,
         'num_workers': 1,
 
         # Training hyperparameters
-        'max_epochs': 2,
+        'max_epochs': 40,
         
         # Paths
         'train_image_dir': '../datasets/corn_yolo_no_segment/images/corn_kernel_train/resized',
@@ -197,6 +330,7 @@ if __name__ == "__main__":
 
     
      # Create model
+    
     model = UNetLightningModule(
         in_channels=hparams['in_channels'],
         out_channels=hparams['out_channels'],
@@ -214,15 +348,55 @@ if __name__ == "__main__":
         val_density_map_dir=hparams['val_density_map_dir']
     )
 
+    # Set up the data module
+    data_module.setup()
+
+    val_dataloader = data_module.val_dataloader()
+    val_samples = next(iter(val_dataloader))
+
+    train_dataloader = data_module.train_dataloader()
+    train_samples = next(iter(train_dataloader))
+
+    # Create visualization callback
+    visualization_callback = DensityMapVisualizationCallback(train_samples)
+
     # Create progress bar callback
     progress_bar = TQDMProgressBar(refresh_rate=20)
+
+    logger = TensorBoardLogger("tb_logs", name="my_model")
+    logger.log_hyperparams(hparams)
 
     # Create trainer
     trainer = pl.Trainer(
         max_epochs=hparams['max_epochs'],
         accelerator="gpu",
-        callbacks=[progress_bar]
+        callbacks=[progress_bar,visualization_callback],
+        logger=logger
     )
+
+    # # Create tuner
+    tuner = Tuner(trainer)
+
+    # Find optimal learning rate
+    lr_finder = tuner.lr_find(model, datamodule=data_module)
+    new_lr = lr_finder.suggestion()
+    model.learning_rate = new_lr
+    print(f"Suggested Learning Rate: {new_lr}")
+
+    # # Find optimal batch size
+    # batch_size_finder = tuner.scale_batch_size(model, datamodule=data_module, mode='power')
+    # new_batch_size = data_module.batch_size
+    # print(f"Suggested Batch Size: {new_batch_size}")
+
+    # # Update hparams with new values
+    # hparams['learning_rate'] = new_lr
+    # hparams['batch_size'] = new_batch_size
+
+    # Log updated hyperparameters
+    logger.log_hyperparams(hparams)
+
 
     # Train the model
     trainer.fit(model, data_module)
+
+    # predictions = trainer.predict(dataloaders=predict_dataloader)
