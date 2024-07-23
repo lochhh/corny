@@ -197,20 +197,36 @@ def visualize_density_map(image_path, density_map_path, output_path=None):
     # plt.close()
 
 if __name__ == "__main__":
-    stub = 'test'
-    image_folder = '../datasets/corn_yolo_no_segment/images/corn_kernel_'+ stub + '/'
-    annotation_folder = '../datasets/corn_yolo_no_segment/labels/corn_kernel_' + stub + '/'
-    output_image_folder = './resized_images/kernel-' + stub + '/'
-    output_map_folder = './maps/kernel-' + stub + '/'
-    class_labels = [ 0 ] # 0 for kernel
-    sigma = 1.8
+    stub = 'val'
     target_size = (256, 256)
+    sigma = 1.8
+
+    target_size_str = f"{target_size[0]}x{target_size[1]}"
+    
+    
+    output_image_folder = f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"
+    output_map_folder = f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"
+
+    image_folder = '../datasets/corn_kernel_yolo/images/'+ stub + '/'
+    annotation_folder = '../datasets/corn_kernel_yolo/labels/' + stub + '/'
+    
+    class_labels = [ 0 ] # 0 for kernel
     
     process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size, sigma)
     
-    # img_name = 'corn_110'
-    # image_path = image_folder + 'resized/' + img_name + '.jpg'
-    # kernel_density_map_path = output_map_folder + img_name +  '_class_0_density.npy'
-    # # allclass_density_map_path = './maps/all-classes/' + img_name + '_overall_density.npy'
-    # # visualize_density_map(image_path, allclass_density_map_path, output_path=None)
-    # visualize_density_map(image_path, kernel_density_map_path, output_path=None)
+
+    # Visualize the density map for a sample (first) image in the dataset
+    image_files = os.listdir(output_image_folder)
+    
+    if image_files:
+        first_image_file = image_files[0]
+
+        image_path = os.path.join(output_image_folder, first_image_file)
+        img_name = os.path.splitext(first_image_file)[0]
+        kernel_density_map_path = os.path.join(output_map_folder, f"{img_name}_class_0_density.npy")
+
+        visualize_density_map(image_path, kernel_density_map_path, output_path=None)
+    else:
+        print("No files found in the output_image_folder.")
+    
+ 
