@@ -35,7 +35,7 @@ def create_density_map(image_shape, points, sigma=10, min_value=1e-4):
     density_map = np.zeros(image_shape, dtype=np.float32)
     
     for x, y, _ in points:
-        density_map[y, x] = 1
+        density_map[y, x] = 100
     
     density_map = gaussian_filter(density_map, sigma=sigma, mode='constant')
     
@@ -170,42 +170,40 @@ def visualize_density_map(image_path, density_map_path, output_path=None):
     # plt.close()
 
 if __name__ == "__main__":
-    stub = 'test'
-    target_size = (256, 256)
+    
+    stub_list = ['train', 'val', 'test']
+    target_size = (512, 512)
     sigma = 12
+    resize = True
 
-    #if resize is false, target size will be ignored. Adjust sigma accordningly
-    resize = False
-    
-    if resize:
-        target_size_str = f"{target_size[0]}x{target_size[1]}"
-    else:
-        target_size_str = "orignal_size"
-    
-    
-    output_image_folder = f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"
-    output_map_folder = f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"
+    for stub in stub_list:
+        if resize:
+            target_size_str = f"{target_size[0]}x{target_size[1]}"
+        else:
+            target_size_str = "original_size"
 
-    image_folder = '../datasets/corn_kernel_yolo/images/'+ stub + '/'
-    annotation_folder = '../datasets/corn_kernel_yolo/labels/' + stub + '/'
-    
-    class_labels = [ 0 ] # 0 for kernel
-    
-    process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size, sigma)
-    
+        output_image_folder = f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"
+        output_map_folder = f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"
 
-    # Visualize the density map for a sample (first) image in the dataset
-    image_files = os.listdir(output_image_folder)
-    
-    if image_files:
-        first_image_file = image_files[0]
+        image_folder = f"../datasets/corn_kernel_yolo/images/{stub}/"
+        annotation_folder = f"../datasets/corn_kernel_yolo/labels/{stub}/"
 
-        image_path = os.path.join(output_image_folder, first_image_file)
-        img_name = os.path.splitext(first_image_file)[0]
-        kernel_density_map_path = os.path.join(output_map_folder, f"{img_name}_class_0_density.npy")
+        class_labels = [0]  # 0 for kernel
 
-        visualize_density_map(image_path, kernel_density_map_path, output_path=None)
-    else:
-        print("No files found in the output_image_folder.")
+        process_images(image_folder, annotation_folder, output_map_folder, output_image_folder, class_labels, target_size, sigma)
+
+        # Visualize the density map for a sample (first) image in the dataset
+        image_files = [file for file in os.listdir(output_image_folder) if file.lower().endswith('.jpg')]
+
+        if image_files:
+            first_image_file = image_files[0]
+
+            image_path = os.path.join(output_image_folder, first_image_file)
+            img_name = os.path.splitext(first_image_file)[0]
+            kernel_density_map_path = os.path.join(output_map_folder, f"{img_name}_class_0_density.npy")
+
+            visualize_density_map(image_path, kernel_density_map_path, output_path=None)
+        else:
+            print("No files found in the output_image_folder.")
     
  
