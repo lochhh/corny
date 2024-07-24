@@ -7,11 +7,16 @@ channels:
 dependencies:
   - python
   - pip
+  - ipywidgets
   - pytorch
   - torchvision
   - pytorch-cuda=11.8
   - ultralytics
+  - lightning
   - pip:
       - ipykernel
       - supervision
-      - h5py
+      - segmentation-models-pytorch
+      - tensorboardX
+      - tensorboard
+      - albumentations
