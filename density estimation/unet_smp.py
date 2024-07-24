@@ -360,9 +360,9 @@ class CornKernelDataModule(L.LightningDataModule):
                 JointTransform(transforms.RandomCrop(256)),
                 # JointTransform(transforms.RandomHorizontalFlip()),
                 transforms.ToTensor(),  # This will only be applied to the image
-                # transforms.Normalize(
-                #    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                # ),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
                 # transforms.RandomErasing(p=0.1),
                 # transforms.RandomRotation(degrees=180),
                 # transforms.RandomHorizontalFlip(p=0.5),
@@ -521,6 +521,7 @@ if __name__ == "__main__":
     # Create progress bar callback
     progress_bar = TQDMProgressBar(refresh_rate=20)
 
+    logger = TensorBoardLogger("../logs/tb_logs", name="unet_smp")
     logger = TensorBoardLogger("../logs/tb_logs", name="unet_vanilla")
     logger.log_hyperparams(hparams)
 
@@ -557,4 +558,3 @@ if __name__ == "__main__":
     trainer.fit(model, data_module)
 
     # predictions = trainer.predict(dataloaders=predict_dataloader)
-

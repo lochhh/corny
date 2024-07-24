@@ -137,8 +137,10 @@ cython_debug/
 # Ignore DS_Store files
 **/.DS_Store
 
-# Ignore all files in density estimation/tb_logs
+# Ignore log filees
 density\ estimation/tb_logs/*
+logs/*
+
 
 # Ignore all files starting with . and ending with .ckpt in density estimation/
 density\ estimation/.*.ckpt
