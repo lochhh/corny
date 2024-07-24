@@ -171,31 +171,21 @@ class UNetLightningModule(pl.LightningModule):
                 # 'gradient_clip_algorithm': 'norm'
             }
 
-# class CornKernelDataset(Dataset):
-#     def __init__(self, image_dir, density_map_dir, transform=None):
-#         self.image_dir = image_dir
-#         self.density_map_dir = density_map_dir
+# class JointTransform:
+#     def __init__(self, transform):
 #         self.transform = transform
-#         self.image_files = [f.split('.')[0] for f in os.listdir(image_dir) if f.endswith('.jpg')]
 
-#     def __len__(self):
-#         return len(self.image_files)
-
-#     def __getitem__(self, idx):
-#         img_name = self.image_files[idx]
-        
-#         image_path = os.path.join(self.image_dir, img_name + '.jpg')
-#         density_map_path = os.path.join(self.density_map_dir, f'{img_name}_class_0_density.npy')
-
-#         # Load image
-#         image = Image.open(image_path).convert('RGB')
-#         # Load density map
-#         density_map = np.load(density_map_path)
-
-#         if self.transform:
+#     def __call__(self, image, density_map):
+#         if isinstance(self.transform, transforms.RandomCrop):
+#             i, j, h, w = self.transform.get_params(image, self.transform.size)
+#             image = TF.crop(image, i, j, h, w)
+#             density_map = TF.crop(density_map, i, j, h, w)
+#         else:
+#             seed = torch.randint(0, 2**32, (1,)).item()
+#             torch.manual_seed(seed)
 #             image = self.transform(image)
-#             density_map = torch.from_numpy(density_map).float().unsqueeze(0)
-
+#             torch.manual_seed(seed)
+#             density_map = self.transform(density_map)
 #         return image, density_map
 
 class JointTransform:
@@ -204,6 +194,28 @@ class JointTransform:
 
     def __call__(self, image, density_map):
         if isinstance(self.transform, transforms.RandomCrop):
+            # Get desired crop size
+            crop_height, crop_width = self.transform.size
+            img_width, img_height = image.size
+
+            # Check if padding is needed
+            pad_height = max(crop_height - img_height, 0)
+            pad_width = max(crop_width - img_width, 0)
+
+            if pad_height > 0 or pad_width > 0:
+                # Calculate padding
+                padding = [
+                    pad_width // 2,
+                    pad_height // 2,
+                    pad_width - (pad_width // 2),
+                    pad_height - (pad_height // 2)
+                ]
+                
+                # Apply padding
+                image = TF.pad(image, padding, fill=0)
+                density_map = TF.pad(density_map, padding, fill=0)
+
+            # Now apply random crop
             i, j, h, w = self.transform.get_params(image, self.transform.size)
             image = TF.crop(image, i, j, h, w)
             density_map = TF.crop(density_map, i, j, h, w)
@@ -238,50 +250,12 @@ class CornKernelDataset(Dataset):
         if self.transform:
             for t in self.transform.transforms:
                 if isinstance(t, JointTransform):
+                    # print(f"Joint Transform {img_name}")
                     image, density_map = t(image, density_map)
                 else:
                     image = t(image)
 
         return image, density_map
-
-# class CornKernelDataModule(pl.LightningDataModule):
-#     def __init__(self, batch_size, num_workers, train_image_dir, train_density_map_dir, 
-#                  val_image_dir, val_density_map_dir,crop_size=None):
-#         super().__init__()
-#         self.batch_size = batch_size
-#         self.num_workers = num_workers
-#         self.train_image_dir = train_image_dir
-#         self.train_density_map_dir = train_density_map_dir
-#         self.val_image_dir = val_image_dir
-#         self.val_density_map_dir = val_density_map_dir
-#         self.transform = transforms.Compose([
-#             transforms.ToTensor(),
-#             # transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.229, 0.224, 0.225])  # ImageNet stats
-#         ])
-
-#     def setup(self, stage=None):
-#         self.train_dataset = CornKernelDataset(
-#             image_dir=self.train_image_dir,
-#             density_map_dir=self.train_density_map_dir,
-#             transform=self.transform
-#         )
-        
-#         self.val_dataset = CornKernelDataset(
-#             image_dir=self.val_image_dir,
-#             density_map_dir=self.val_density_map_dir,
-#             transform=self.transform
-#         )
-
-#     def train_dataloader(self):
-#         return DataLoader(self.train_dataset, batch_size=self.batch_size, 
-#                          shuffle=True, num_workers=self.num_workers)
-
-#     def val_dataloader(self):
-#         return DataLoader(self.val_dataset, batch_size=self.batch_size, 
-#                          num_workers=self.num_workers)
-    
-#     def predict_dataloader(self) -> torch.Any:
-#         return super().predict_dataloader()
 
 class CornKernelDataModule(pl.LightningDataModule):
     def __init__(self, batch_size, num_workers, train_image_dir, train_density_map_dir, 
@@ -295,7 +269,7 @@ class CornKernelDataModule(pl.LightningDataModule):
         self.val_density_map_dir = val_density_map_dir
         
         self.transform = transforms.Compose([
-            JointTransform(transforms.RandomCrop(128)),
+            JointTransform(transforms.RandomCrop(256)),
             # JointTransform(transforms.RandomHorizontalFlip()),
             transforms.ToTensor(),  # This will only be applied to the image
         ])
@@ -325,11 +299,13 @@ class CornKernelDataModule(pl.LightningDataModule):
                          num_workers=self.num_workers)
 
 class DensityMapVisualizationCallback(Callback):
-    def __init__(self, val_samples, num_samples=4):
+    def __init__(self, val_samples,cmap,vmin,vmax, num_samples=4):
         super().__init__()
         self.val_imgs, self.val_density_maps = val_samples
         self.num_samples = num_samples
-
+        self.cmap = cmap
+        self.vmin = vmin
+        self.vmax = vmax
     def on_validation_epoch_end(self, trainer, pl_module):
         # Move validation samples to the same device as the model
         val_imgs = self.val_imgs[:self.num_samples].to(pl_module.device)
@@ -354,12 +330,12 @@ class DensityMapVisualizationCallback(Callback):
             axes[i, 0].axis('off')
             
             # Display ground truth density map
-            axes[i, 1].imshow(val_density_maps[i].cpu().squeeze(), cmap='jet')
+            axes[i, 1].imshow(val_density_maps[i].cpu().squeeze(), cmap=self.cmap, vmin=self.vmin, vmax=self.vmax)
             axes[i, 1].set_title("Ground Truth")
             axes[i, 1].axis('off')
             
             # Display predicted density map
-            axes[i, 2].imshow(preds[i].cpu().squeeze(), cmap='jet')
+            axes[i, 2].imshow(preds[i].cpu().squeeze(),  cmap=self.cmap, vmin=self.vmin, vmax= self.vmax)
             axes[i, 2].set_title("Prediction")
             axes[i, 2].axis('off')
         
@@ -380,17 +356,17 @@ if __name__ == "__main__":
         'learning_rate': 1e-4,
 
         # Data hyperparameters
-        'batch_size': 8,
+        'batch_size': 4,
         'num_workers': 1,
 
         # Training hyperparameters
-        'max_epochs': 10,
+        'max_epochs': 40,
         
         # Paths
-        'train_image_dir': '../datasets/corn_kernel_density/train/256x256/sigma-1.8',
-        'train_density_map_dir': '../datasets/corn_kernel_density/train/256x256/sigma-1.8',
-        'val_image_dir': '../datasets/corn_kernel_density/val/256x256/sigma-1.8',
-        'val_density_map_dir': '../datasets/corn_kernel_density/val/256x256/sigma-1.8',
+        'train_image_dir': '../datasets/corn_kernel_density/train/512x512/sigma-10',
+        'train_density_map_dir': '../datasets/corn_kernel_density/train/512x512/sigma-10',
+        'val_image_dir': '../datasets/corn_kernel_density/val/512x512/sigma-10',
+        'val_density_map_dir': '../datasets/corn_kernel_density/val/512x512/sigma-10',
     }
 
     
@@ -423,7 +399,7 @@ if __name__ == "__main__":
     # train_samples = next(iter(train_dataloader))
 
     # Create visualization callback
-    visualization_callback = DensityMapVisualizationCallback(val_samples)
+    visualization_callback = DensityMapVisualizationCallback(val_samples, cmap='RdYlBu_r',vmin=None, vmax = None, num_samples=4)
 
     # Create progress bar callback
     progress_bar = TQDMProgressBar(refresh_rate=20)
