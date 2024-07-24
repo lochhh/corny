@@ -2,7 +2,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import TQDMProgressBar, Callback
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.tuner import Tuner
-from pytorch_lightning.utilities.types import EVAL_DATALOADERS
+
 
 import torch
 from torch import nn

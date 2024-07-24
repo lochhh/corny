@@ -1,6 +1,8 @@
 # tensorboard logs
 /logs
 
+/density estimation/unet_pretrained.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
