@@ -1,7 +1,7 @@
-# tensorboard logs
-/logs
 
+# ignore local scripts 
 /density estimation/unet_pretrained.py
+/density estimation/unet_vanilla.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
