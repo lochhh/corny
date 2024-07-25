@@ -144,3 +144,9 @@ density\ estimation/.*.ckpt
 
 # Ignore all Thumbs.db files in all directories
 Thumbs.db
+
+# Ignore slurm output files
+slurm_output/*
+
+# Ignore density files
+datasets/corn_kernel_density/*
