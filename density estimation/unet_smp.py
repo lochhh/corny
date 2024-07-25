@@ -522,6 +522,7 @@ if __name__ == "__main__":
     progress_bar = TQDMProgressBar(refresh_rate=20)
 
     logger = TensorBoardLogger("../logs/tb_logs", name="unet_smp")
+    logger = TensorBoardLogger("../logs/tb_logs", name="unet_vanilla")
     logger.log_hyperparams(hparams)
 
     # Create trainer
