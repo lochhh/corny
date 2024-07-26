@@ -7,7 +7,7 @@ import numpy as np
 import segmentation_models_pytorch as smp
 import torch
 import torchvision.transforms.functional as TF
-from lightning.pytorch.callbacks import Callback, TQDMProgressBar
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from PIL import Image
 from torch import nn
@@ -354,7 +354,7 @@ class DensityMapVisualizationCallback(Callback):
 
 
 if __name__ == "__main__":
-    root_dir = "/nfs/nhome/live/chuan/corny/"
+    root_dir = "../"
     # Define hyperparameters
     hparams = {
         # Model hyperparameters
@@ -411,8 +411,16 @@ if __name__ == "__main__":
     # Create progress bar callback
     progress_bar = TQDMProgressBar(refresh_rate=20)
 
-    logger = TensorBoardLogger("../logs/tb_logs", name="unet_smp")
-    logger = TensorBoardLogger("../logs/tb_logs", name="unet_vanilla")
+    # Create checkpoint callback
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=f"{root_dir}checkpoint/",
+        filename="unet_smp-{epoch:02d}-{val_mse_loss:.4f}",
+        save_top_k=2,
+        monitor="val_mse_loss",
+    )
+
+    # checkpoint_callback.best_model_path
+    logger = TensorBoardLogger(f"{root_dir}logs/tb_logs", name="unet_smp")
     logger.log_hyperparams(hparams)
 
     # Create trainer
