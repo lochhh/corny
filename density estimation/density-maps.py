@@ -46,8 +46,8 @@ def create_density_map(image_shape, points, sigma=10, min_value=1e-4):
     # Clip the Gaussian output
     density_map = np.clip(density_map, a_min=min_value, a_max=None)
 
-    # Normalize the map
-    density_map = density_map / density_map.sum() * len(points)
+    # Normalize the map and scale it up to the number of points * 100
+    density_map = density_map / density_map.sum() * len(points) * 100
 
     return density_map
 
@@ -210,14 +210,14 @@ def visualize_density_map(image_path, density_map_path, output_path=None):
 if __name__ == "__main__":
     stub_list = ["train", "val", "test"]
     target_size = (512, 512)
-    sigma = 7
-    resize = True
+    sigma = 12
+    resize = False
 
     for stub in stub_list:
         if resize:
             target_size_str = f"{target_size[0]}x{target_size[1]}"
         else:
-            target_size_str = "original_size"
+            target_size_str = "original_size_dmx100"
 
         output_image_folder = (
             f"../datasets/corn_kernel_density/{stub}/{target_size_str}/sigma-{sigma}/"

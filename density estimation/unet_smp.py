@@ -7,138 +7,49 @@ import numpy as np
 import segmentation_models_pytorch as smp
 import torch
 import torchvision.transforms.functional as TF
-from lightning.pytorch.callbacks import Callback, TQDMProgressBar
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.tuner import Tuner
 from PIL import Image
-from segmentation_models_pytorch.base import SegmentationHead
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 
-class ConvBlock(nn.Module):
+class DensityBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv1 = nn.Conv2d(
-            in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1
-        )
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(
-            in_channels=out_channels,
-            out_channels=out_channels,
-            kernel_size=3,
-            padding=1,
-        )
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.LeakyReLU(0.1)
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        x = self.conv1(x)
-        # print(f"Conv1 output range: {x.min().item()} to {x.max().item()}")
-
-        x = self.bn1(x)
-        # print(f"BN1 output range: {x.min().item()} to {x.max().item()}")
-
-        x = self.relu(x)
-        # print(f"ReLU1 output range: {x.min().item()} to {x.max().item()}")
-
-        x = self.conv2(x)
-        # print(f"Conv2 output range: {x.min().item()} to {x.max().item()}")
-
-        x = self.bn2(x)
-        # print(f"BN2 output range: {x.min().item()} to {x.max().item()}")
-
-        x = self.relu(x)
-        # print(f"ReLU2 output range: {x.min().item()} to {x.max().item()}")
-
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.relu(self.bn2(self.conv2(x)))
         return x
 
 
-class EncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
+class DensityLoss(nn.Module):
+    def __init__(self, lambda_mse=1.0, lambda_mape=0.5):
         super().__init__()
-        self.conv = ConvBlock(in_channels, out_channels)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.lambda_mse = lambda_mse
+        self.lambda_mape = lambda_mape
 
-    def forward(self, x):
-        features = self.conv(x)
-        pooled = self.pool(features)
-        return pooled, features
-
-
-class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
-        self.conv = ConvBlock(
-            out_channels * 2, out_channels
-        )  # *2 because of concatenation
-
-    def forward(self, x, skip_connection):
-        upsampled = self.up(x)
-        combined_features = torch.cat([upsampled, skip_connection], dim=1)
-        return self.conv(combined_features)
-
-
-class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels, features=[64, 128, 256, 512]):
-        super().__init__()
-        self.encoder_blocks = nn.ModuleList()
-        self.decoder_blocks = nn.ModuleList()
-
-        # Encoder blocks
-        for feature in features:
-            self.encoder_blocks.append(EncoderBlock(in_channels, feature))
-            in_channels = feature
-
-        self.bottleneck = ConvBlock(features[-1], features[-1] * 2)
-
-        # Decoder blocks
-        for feature in reversed(features):
-            self.decoder_blocks.append(DecoderBlock(feature * 2, feature))
-
-        self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
-
-    def forward(self, x):
-        skip_connections = []
-
-        # Encoder path
-        for idx, encoder in enumerate(self.encoder_blocks):
-            # print(f"Evaluating encoder block {idx}")
-            x, features = encoder(x)
-            if torch.isnan(x).any():
-                print(f"NaN detected in encoder block {idx}")
-            skip_connections.append(features)
-
-        # print(f"Evaluating bottleneck")
-        x = self.bottleneck(x)
-
-        # Decoder path
-        skip_connections = skip_connections[::-1]  # Reverse the list
-        for idx, decoder in enumerate(self.decoder_blocks):
-            # print(f"Evaluating decoder block {idx}")
-            x = decoder(x, skip_connections[idx])
-
-        # Final output layer
-        return self.final_conv(x)
-
-
-def weights_init(m):
-    if isinstance(m, nn.Conv2d):
-        nn.init.kaiming_normal_(
-            m.weight, mode="fan_out", nonlinearity="leaky_relu", a=0.1
-        )
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)
-    elif isinstance(m, nn.BatchNorm2d):
-        nn.init.constant_(m.weight, 1)
-        nn.init.constant_(m.bias, 0)
+    def forward(self, pred, target):
+        # Calculate the loss
+        mse_loss = F.mse_loss(pred, target)
+        pred_count = pred.sum(dim=(2, 3)) + 1
+        target_count = target.sum(dim=(2, 3)) + 1
+        mape_loss = torch.mean(torch.abs(target_count - pred_count) / target_count)
+        return self.lambda_mse * mse_loss + self.lambda_mape * mape_loss
 
 
 class UNetLightningModule(L.LightningModule):
-    def __init__(self, in_channels, out_channels, decoder_channels, learning_rate):
+    def __init__(
+        self, in_channels, out_channels, decoder_channels, learning_rate, loss_fn="mse"
+    ):
         super().__init__()
         self.learning_rate = learning_rate
         model = smp.Unet(
@@ -147,42 +58,35 @@ class UNetLightningModule(L.LightningModule):
             decoder_channels=decoder_channels,  # input channels param for convolutions in decoder
             in_channels=in_channels,  # model input channels (1 for grayscale images, 3 for RGB, etc.)
             classes=out_channels,  # model output channels (number of classes)
+            decoder_attention_type="scse",
         )
         self.encoder = model.encoder
         self.decoder = model.decoder
-        self.density_block = nn.Sequential(
-            nn.Conv2d(32, 16, kernel_size=3, padding=1),
-            nn.BatchNorm2d(16),
+        self.density_block = DensityBlock(32, 64)
+        self.final_conv = nn.Sequential(
+            nn.Conv2d(64, out_channels, kernel_size=1),
             nn.ReLU(),
         )
-        self.segmentation_head = SegmentationHead(
-            in_channels=16,
-            out_channels=out_channels,
-            kernel_size=1,
-            activation=None,
-        )
-        self.final_activation = nn.ReLU()
-
-    # # initialise weights
-    # def configure_model(self):
-    #     self.apply(weights_init)
+        self.density_loss = DensityLoss()
+        self.loss_fn = loss_fn
 
     def forward(self, x):
         features = self.encoder(x)
         decoder_output = self.decoder(*features)
-        density_block = self.density_block(decoder_output)
-        density_map = self.segmentation_head(density_block)
-        return self.final_activation(density_map)
+        density = self.density_block(decoder_output)
+        return self.final_conv(density)
         # return self.model(x)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
 
-        loss = F.mse_loss(y_hat, y)
-
+        if self.loss_fn == "mse":
+            loss = F.mse_loss(y_hat, y)
+        else:
+            loss = self.density_loss(y_hat, y)
         # print(f"Loss: {loss.item()}")
-        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("train_loss", loss, prog_bar=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -192,8 +96,8 @@ class UNetLightningModule(L.LightningModule):
         # Calculate various metrics
 
         # Calculate count error
-        true_count = y.sum(dim=(1, 2, 3))
-        pred_count = y_hat.sum(dim=(1, 2, 3))
+        true_count = y.sum(dim=(1, 2, 3)) / 100
+        pred_count = y_hat.sum(dim=(1, 2, 3)) / 100
         count_error = torch.abs(true_count - pred_count)
 
         # Log all metrics
@@ -204,11 +108,13 @@ class UNetLightningModule(L.LightningModule):
             on_step=False,
             on_epoch=True,
         )
-
-        loss = F.mse_loss(y_hat, y)
+        if self.loss_fn == "mse":
+            loss = F.mse_loss(y_hat, y)
+        else:
+            loss = self.density_loss(y_hat, y)
 
         # print(f"Validation Loss: {loss.item()}")
-        self.log("val_mse_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("val_mse_loss", loss, prog_bar=True, on_epoch=True)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
@@ -217,24 +123,6 @@ class UNetLightningModule(L.LightningModule):
             # 'gradient_clip_val': 0.1,
             # 'gradient_clip_algorithm': 'norm'
         }
-
-
-# class JointTransform:
-#     def __init__(self, transform):
-#         self.transform = transform
-
-#     def __call__(self, image, density_map):
-#         if isinstance(self.transform, transforms.RandomCrop):
-#             i, j, h, w = self.transform.get_params(image, self.transform.size)
-#             image = TF.crop(image, i, j, h, w)
-#             density_map = TF.crop(density_map, i, j, h, w)
-#         else:
-#             seed = torch.randint(0, 2**32, (1,)).item()
-#             torch.manual_seed(seed)
-#             image = self.transform(image)
-#             torch.manual_seed(seed)
-#             density_map = self.transform(density_map)
-#         return image, density_map
 
 
 class JointTransform:
@@ -357,16 +245,12 @@ class CornKernelDataModule(L.LightningDataModule):
 
         self.transform = transforms.Compose(
             [
-                JointTransform(transforms.RandomCrop(256)),
-                # JointTransform(transforms.RandomHorizontalFlip()),
+                JointTransform(transforms.RandomHorizontalFlip(p=0.5)),
+                JointTransform(transforms.RandomVerticalFlip(p=0.5)),
+                JointTransform(transforms.RandomCrop((480, 640))),
+                # JointTransform(transforms.RandomRotation(degrees=180)),
                 transforms.ToTensor(),  # This will only be applied to the image
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
-                # transforms.RandomErasing(p=0.1),
-                # transforms.RandomRotation(degrees=180),
-                # transforms.RandomHorizontalFlip(p=0.5),
-                # transforms.RandomVerticalFlip(p=0.5),
+                # JointTransform(transforms.RandomErasing(p=0.1)),
                 # CustomHSVTransform(hsv_h=0.1, hsv_s=0.1, hsv_v=0.2),
             ]
         )
@@ -412,13 +296,17 @@ class DensityMapVisualizationCallback(Callback):
         self.cmap = cmap
         self.vmin = vmin
         self.vmax = vmax
+        # randomly sample 4 indices from val_imgs
+        self.idxs = random.sample(range(len(self.val_imgs)), self.num_samples)
 
     def on_validation_epoch_end(self, trainer, pl_module):
         # Move validation samples to the same device as the model
-        val_imgs = self.val_imgs[: self.num_samples].to(pl_module.device)
-        val_density_maps = self.val_density_maps[: self.num_samples].to(
-            pl_module.device
-        )
+        val_imgs = self.val_imgs[self.idxs].to(pl_module.device)
+        val_density_maps = self.val_density_maps[self.idxs].to(pl_module.device)
+        # val_imgs = self.val_imgs[: self.num_samples].to(pl_module.device)
+        # val_density_maps = self.val_density_maps[: self.num_samples].to(
+        #     pl_module.device
+        # )
 
         # Get predictions
         pl_module.eval()
@@ -466,6 +354,7 @@ class DensityMapVisualizationCallback(Callback):
 
 
 if __name__ == "__main__":
+    root_dir = "../"
     # Define hyperparameters
     hparams = {
         # Model hyperparameters
@@ -473,16 +362,17 @@ if __name__ == "__main__":
         "out_channels": 1,
         "decoder_channels": (512, 256, 128, 64, 32),
         "learning_rate": 1e-4,
+        "loss_fn": "mse",  # "mse" or "custom"
         # Data hyperparameters
-        "batch_size": 16,
+        "batch_size": 8,
         "num_workers": 1,
         # Training hyperparameters
-        "max_epochs": 10,
+        "max_epochs": 300,
         # Paths
-        "train_image_dir": "../datasets/corn_kernel_density/train/512x512/sigma-7",
-        "train_density_map_dir": "../datasets/corn_kernel_density/train/512x512/sigma-7",
-        "val_image_dir": "../datasets/corn_kernel_density/val/512x512/sigma-7",
-        "val_density_map_dir": "../datasets/corn_kernel_density/val/512x512/sigma-7",
+        "train_image_dir": f"{root_dir}datasets/corn_kernel_density/train/original_size_dmx100/sigma-12",
+        "train_density_map_dir": f"{root_dir}datasets/corn_kernel_density/train/original_size_dmx100/sigma-12",
+        "val_image_dir": f"{root_dir}datasets/corn_kernel_density/val/original_size_dmx100/sigma-12",
+        "val_density_map_dir": f"{root_dir}datasets/corn_kernel_density/val/original_size_dmx100/sigma-12",
     }
 
     # Create model
@@ -521,26 +411,34 @@ if __name__ == "__main__":
     # Create progress bar callback
     progress_bar = TQDMProgressBar(refresh_rate=20)
 
-    logger = TensorBoardLogger("../logs/tb_logs", name="unet_smp")
-    logger = TensorBoardLogger("../logs/tb_logs", name="unet_vanilla")
+    # Create checkpoint callback
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=f"{root_dir}checkpoint/",
+        filename="unet_smp-{epoch:02d}-{val_mse_loss:.4f}",
+        save_top_k=2,
+        monitor="val_mse_loss",
+    )
+
+    # checkpoint_callback.best_model_path
+    logger = TensorBoardLogger(f"{root_dir}logs/tb_logs", name="unet_smp")
     logger.log_hyperparams(hparams)
 
     # Create trainer
     trainer = L.Trainer(
         max_epochs=hparams["max_epochs"],
         accelerator="gpu",
-        callbacks=[progress_bar, visualization_callback],
+        callbacks=[progress_bar, visualization_callback, checkpoint_callback],
         logger=logger,
     )
 
     # # Create tuner
-    tuner = Tuner(trainer)
+    # tuner = Tuner(trainer)
 
     # Find optimal learning rate
-    lr_finder = tuner.lr_find(model, datamodule=data_module)
-    new_lr = lr_finder.suggestion()
-    model.learning_rate = new_lr
-    print(f"Suggested Learning Rate: {new_lr}")
+    # lr_finder = tuner.lr_find(model, datamodule=data_module)
+    # new_lr = lr_finder.suggestion()
+    # model.learning_rate = new_lr
+    # print(f"Suggested Learning Rate: {new_lr}")
 
     # # Find optimal batch size
     # batch_size_finder = tuner.scale_batch_size(model, datamodule=data_module, mode='power')
