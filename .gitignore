@@ -134,22 +134,26 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# Ignore DS_Store files
+# DS_Store files
 **/.DS_Store
 
-# Ignore log filees
-density\ estimation/tb_logs/*
+# Log files
 logs/*
 
+# All .ckpt files
+*.ckpt
 
-# Ignore all files starting with . and ending with .ckpt in density estimation/
-density\ estimation/.*.ckpt
-
-# Ignore all Thumbs.db files in all directories
+# All Thumbs.db files
 Thumbs.db
 
-# Ignore slurm output files
+# SLURM output files
 slurm_output/*
 
-# Ignore density files
+# Density files
 datasets/corn_kernel_density/*
+
+# Object detection files
+object_detection/runs/detect/corn_kernel_baseline_*/**
+
+# YOLOv8 pretrained weights
+object_detection/yolov8n.pt
