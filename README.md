@@ -1,7 +1,7 @@
 # Corny
 This repository contains the code and dataset used in the
 [Neuromatch Academy Deep Learning Course 2024](https://neuromatch.io/deep-learning-course/) 
-group project "Corny".
+group project "Corny". The presentation slides are available [here](https://docs.google.com/presentation/d/1Z6gDBXIPBHSi7-huj27uMskPq4KsYba3JisfrLrUn_I/edit?usp=sharing).
 
 ## Dataset
 The dataset used in this project is the *Base* portion of the [Intelinair Corn Kernel Counting dataset](https://registry.opendata.aws/intelinair_corn_kernel_counting/).[^1] 
